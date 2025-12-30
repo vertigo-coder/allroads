@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
-"""
-Software Development Roadmap Builder
-A GUI application for creating and managing software development roadmaps with quarterly timeline view
-"""
-
+#!/usr/bin/python3
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, colorchooser
 import json
@@ -18,6 +13,7 @@ class Feature:
     title: str
     description: str
     completed: bool = False
+    status: str = "Planned"
     color: str = "#2196F3"
 
 @dataclass
@@ -87,7 +83,8 @@ class QuarterFrame(ttk.Frame):
                 id=f"feature_{len(self.quarter.features) if self.quarter.features else 0}",
                 title=dialog.result['title'],
                 description=dialog.result['description'],
-                color=dialog.result.get('color', '#2196F3')
+                color=dialog.result.get('color', '#2196F3'),
+                status=dialog.result.get('status', 'Planned')
             )
             if self.quarter.features is not None:
                 self.quarter.features.append(feature)
@@ -127,6 +124,13 @@ class QuarterFrame(ttk.Frame):
                                   bg="white", fg="black", font=("Arial", 9, "bold" if not feature.completed else "normal"))
                 cb.pack(side=tk.LEFT)
                 
+                # Status label (clickable to edit)
+                status_color = "green" if feature.completed else "black"
+                status_label = tk.Label(title_frame, text=f" [{feature.status}]", 
+                                      fg=status_color, font=("Arial", 8), cursor="hand2")
+                status_label.pack(side=tk.LEFT, padx=(5, 0))
+                status_label.bind("<Button-1>", lambda e, f=feature: self.edit_status(f))
+                
                 # Description
                 desc_label = tk.Label(content_frame, text=feature.description, 
                                      bg="white", fg="gray", font=("Arial", 8), 
@@ -165,7 +169,10 @@ class QuarterFrame(ttk.Frame):
     
     def toggle_feature(self, feature, var):
         """Toggle feature completion"""
-        feature.completed = var.get()
+        is_completed = var.get()
+        feature.completed = is_completed
+        if is_completed:
+            feature.status = "Completed"
         self.refresh_features()
     
     def edit_feature(self, feature):
@@ -175,8 +182,54 @@ class QuarterFrame(ttk.Frame):
             feature.title = dialog.result['title']
             feature.description = dialog.result['description']
             feature.color = dialog.result.get('color', feature.color)
+            feature.status = dialog.result.get('status', feature.status)
             self.refresh_features()
             self.app.status_var.set(f"Updated feature: {feature.title}")
+    
+    def edit_status(self, feature):
+        """Edit feature status"""
+        from tkinter import simpledialog
+        
+        status_options = ["Planned", "Developing", "Testing", "Completed"]
+        
+        # Create a simple dialog
+        dialog = tk.Toplevel(self.app.root)
+        dialog.title("Edit Status")
+        dialog.geometry("300x150")
+        dialog.transient(self.app.root)
+        dialog.grab_set()
+        
+        tk.Label(dialog, text="Select Status:", font=("Arial", 10, "bold")).pack(pady=10)
+        
+        status_var = tk.StringVar(value=feature.status)
+        
+        for status in status_options:
+            tk.Radiobutton(dialog, text=status, variable=status_var, 
+                          value=status).pack(pady=2)
+        
+        def save_status():
+            feature.status = status_var.get()
+            feature.completed = (feature.status == "Completed")
+            self.refresh_features()
+            self.app.status_var.set(f"Updated status to: {feature.status}")
+            dialog.destroy()
+        
+        def cancel():
+            dialog.destroy()
+        
+        button_frame = tk.Frame(dialog)
+        button_frame.pack(pady=10)
+        
+        tk.Button(button_frame, text="OK", command=save_status).pack(side=tk.LEFT, padx=5)
+        tk.Button(button_frame, text="Cancel", command=cancel).pack(side=tk.LEFT, padx=5)
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        dialog.wait_window()
     
     def delete_feature(self, feature):
         """Delete a feature"""
@@ -294,6 +347,18 @@ class FeatureDialog:
         if feature:
             self.desc_text.insert("1.0", feature.description)
         
+        # Status
+        tk.Label(self.dialog, text="Status:", font=("Arial", 10, "bold")).pack(pady=5)
+        status_frame = tk.Frame(self.dialog)
+        status_frame.pack(pady=5)
+        
+        self.status_var = tk.StringVar(value=feature.status if feature else "Planned")
+        status_options = ["Planned", "Developing", "Testing", "Completed"]
+        
+        for status in status_options:
+            tk.Radiobutton(status_frame, text=status, variable=self.status_var, 
+                          value=status).pack(side=tk.LEFT, padx=5)
+        
         # Color
         tk.Label(self.dialog, text="Color:", font=("Arial", 10, "bold")).pack(pady=5)
         color_frame = tk.Frame(self.dialog)
@@ -304,7 +369,13 @@ class FeatureDialog:
         self.color_label.pack(side=tk.LEFT, padx=5)
         
         tk.Button(color_frame, text="Choose Color", 
-                 command=self.choose_color).pack(side=tk.LEFT)
+                 command=self.choose_color).pack(side=tk.LEFT, padx=5)
+        
+        # Manual color input
+        tk.Label(color_frame, text="Hex:").pack(side=tk.LEFT, padx=(10, 2))
+        self.color_entry = tk.Entry(color_frame, width=8, textvariable=self.color_var)
+        self.color_entry.pack(side=tk.LEFT)
+        self.color_entry.bind("<KeyRelease>", lambda e: self.update_color_preview())
         
         # Buttons
         button_frame = tk.Frame(self.dialog)
@@ -327,11 +398,23 @@ class FeatureDialog:
             self.color_var.set(color)
             self.color_label.config(bg=color)
     
+    def update_color_preview(self):
+        """Update color preview when hex value is manually entered"""
+        try:
+            color = self.color_var.get()
+            if color.startswith('#'):
+                color = color[1:]
+            if len(color) == 6 and all(c in '0123456789ABCDEFabcdef' for c in color):
+                self.color_label.config(bg=f"#{color}")
+        except:
+            pass
+    
     def ok_clicked(self):
         self.result = {
             'title': self.title_entry.get().strip(),
             'description': self.desc_text.get("1.0", tk.END).strip(),
-            'color': self.color_var.get()
+            'color': self.color_var.get(),
+            'status': self.status_var.get()
         }
         if self.result['title']:
             self.dialog.destroy()
@@ -343,7 +426,7 @@ class FeatureDialog:
 class RoadmapApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Software Development Roadmap Builder")
+        self.root.title("AllRoads v0.0.2")
         self.root.geometry("1200x700")
         
         self.quarters = []
@@ -536,6 +619,7 @@ class RoadmapApp:
                             title=feature_data['title'],
                             description=feature_data['description'],
                             completed=feature_data.get('completed', False),
+                            status=feature_data.get('status', 'Planned'),
                             color=feature_data.get('color', '#2196F3')
                         )
                         if quarter.features is not None:
@@ -581,6 +665,7 @@ class RoadmapApp:
                                 'title': feature.title,
                                 'description': feature.description,
                                 'completed': feature.completed,
+                                'status': feature.status,
                                 'color': feature.color
                             }
                             for feature in quarter.features
@@ -659,6 +744,7 @@ class RoadmapApp:
                         id=f"feature_{template_type}_{i}_{j}",
                         title=feature_title,
                         description=f"Implementation of {feature_title}",
+                        status="Planned",
                         color=["#4CAF50", "#2196F3", "#FF9800", "#9C27B0"][i % 4]
                     )
                     if quarter.features is not None:
